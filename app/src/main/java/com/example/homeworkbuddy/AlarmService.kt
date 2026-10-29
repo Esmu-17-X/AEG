@@ -15,40 +15,63 @@ import androidx.core.app.NotificationCompat
 
 /** Plays alarm sound, vibrates and blinks the flashlight until stopped. */
 class AlarmService : Service() {
+    companion object {
+        const val ACTION_STOP = "com.example.homeworkbuddy.STOP_ALARM"
+    }
+
     private var player: MediaPlayer? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private val handler = Handler(Looper.getMainLooper())
-    private var torchOn = false
+    private var ringing = false
+    private var phase = false
     private var camId: String? = null
 
     private val blink = object : Runnable {
         override fun run() {
-            setTorch(!torchOn)
-            handler.postDelayed(this, 400)
+            phase = !phase
+            setTorch(phase)
+            handler.postDelayed(this, 350)
         }
     }
 
     override fun onBind(i: Intent?): IBinder? = null
 
     override fun onStartCommand(i: Intent?, flags: Int, startId: Int): Int {
-        if (player != null) return START_NOT_STICKY // already ringing
+        if (i?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        if (ringing) return START_NOT_STICKY
+        ringing = true
+
         val id = i?.getIntExtra("id", 0) ?: 0
+        val test = i?.getBooleanExtra("test", false) ?: false
         val hw = Store.all(this).find { it.id == id }
         Notif.ensure(this)
 
+        val pmFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         val full = PendingIntent.getActivity(
             this, id,
             Intent(this, AlarmActivity::class.java).putExtra("id", id)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            pmFlags
         )
+        val stopPi = PendingIntent.getService(
+            this, 99,
+            Intent(this, AlarmService::class.java).setAction(ACTION_STOP),
+            pmFlags
+        )
+        val title = if (test) "Test alarm" else "Homework time: ${hw?.subject ?: ""}"
+        val body = hw?.note?.ifBlank { "Time to do your homework!" } ?: "Time to do your homework!"
         val n = NotificationCompat.Builder(this, Notif.ALARM)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("Homework time: ${hw?.subject ?: ""}")
-            .setContentText(hw?.note?.ifBlank { "Time to do your homework!" } ?: "Time to do your homework!")
+            .setContentTitle(title)
+            .setContentText(body)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setFullScreenIntent(full, true)
             .setContentIntent(full)
+            .addAction(0, "Stop", stopPi)
             .setOngoing(true)
             .build()
 
@@ -56,10 +79,17 @@ class AlarmService : Service() {
             startForeground(3, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
         else startForeground(3, n)
 
+        // keep the CPU awake so the flashlight keeps blinking with the screen off
+        try {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "homework:alarm")
+            wakeLock?.acquire(3 * 60 * 1000L)
+        } catch (_: Exception) {}
+
         startSound()
         startVibration()
         startFlash()
-        handler.postDelayed({ stopSelf() }, 2 * 60 * 1000L) // auto-stop after 2 min
+        handler.postDelayed({ stopSelf() }, if (test) 10_000L else 120_000L)
         return START_NOT_STICKY
     }
 
@@ -82,25 +112,36 @@ class AlarmService : Service() {
     }
 
     private fun startVibration() {
-        val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400), 0))
+        try {
+            val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 600, 400), 0))
+        } catch (_: Exception) {}
     }
 
     private fun startFlash() {
         try {
             val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            camId = cm.cameraIdList.firstOrNull {
-                cm.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            // check every camera separately so one odd camera can't break the search
+            val withFlash = cm.cameraIdList.filter {
+                try {
+                    cm.getCameraCharacteristics(it)
+                        .get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                } catch (_: Exception) { false }
             }
+            camId = withFlash.firstOrNull {
+                try {
+                    cm.getCameraCharacteristics(it).get(CameraCharacteristics.LENS_FACING) ==
+                        CameraCharacteristics.LENS_FACING_BACK
+                } catch (_: Exception) { false }
+            } ?: withFlash.firstOrNull()
             if (camId != null) handler.post(blink)
         } catch (_: Exception) {}
     }
 
     private fun setTorch(on: Boolean) {
+        val id = camId ?: return
         try {
-            val id = camId ?: return
             (getSystemService(Context.CAMERA_SERVICE) as CameraManager).setTorchMode(id, on)
-            torchOn = on
         } catch (_: Exception) {}
     }
 
@@ -109,7 +150,9 @@ class AlarmService : Service() {
         setTorch(false)
         try { player?.stop(); player?.release() } catch (_: Exception) {}
         player = null
-        (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel()
+        try { (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel() } catch (_: Exception) {}
+        try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
+        ringing = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
