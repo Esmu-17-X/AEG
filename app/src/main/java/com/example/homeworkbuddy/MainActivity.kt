@@ -65,7 +65,11 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (::root.isInitialized) { Store.autoFill(this); render() }
+        if (::root.isInitialized) {
+            Store.autoFill(this)
+            Scheduler.rescheduleAll(this) // restores alarms if a restart wiped them
+            render()
+        }
     }
 
     override fun onNewIntent(i: Intent) {
