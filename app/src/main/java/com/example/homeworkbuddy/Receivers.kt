@@ -50,9 +50,36 @@ class DismissReceiver : BroadcastReceiver() {
     }
 }
 
+/** Runs after restart / app update / time change: puts every alarm back. */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(c: Context, i: Intent) {
-        if (i.action == Intent.ACTION_BOOT_COMPLETED) Scheduler.rescheduleAll(c)
+        // put every pending alarm back
+        Scheduler.rescheduleAll(c)
+
+        // after a restart, tell the user about reminders that were missed while the phone was off
+        val isBoot = i.action == Intent.ACTION_BOOT_COMPLETED ||
+            i.action == "android.intent.action.QUICKBOOT_POWERON"
+        if (!isBoot) return
+
+        val now = System.currentTimeMillis()
+        val missed = Store.all(c).filter {
+            !it.done && it.dueAt <= now && it.dueAt > now - 24 * 60 * 60 * 1000L
+        }
+        if (missed.isEmpty()) return
+
+        Notif.ensure(c)
+        val open = PendingIntent.getActivity(c, 13, Intent(c, MainActivity::class.java), FLAGS)
+        val text = "Your phone was off. You missed: " +
+            missed.joinToString(", ") { it.subject } + ". Tap to open."
+        val n = NotificationCompat.Builder(c, Notif.ASK)
+            .setSmallIcon(android.R.drawable.ic_menu_agenda)
+            .setContentTitle("Missed homework reminder")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        c.getSystemService(NotificationManager::class.java).notify(5, n)
     }
 }
 
