@@ -42,6 +42,7 @@ object Scheduler {
     fun cancelHomework(c: Context, id: Int) = am(c).cancel(hwIntent(c, id))
 
     fun snooze(c: Context, id: Int) {
+        Store.addSnooze(c, id) // the Copilot counts snoozes
         val due = System.currentTimeMillis() + SNOOZE_MIN * 60_000L
         Store.setDue(c, id, due)
         Store.all(c).find { it.id == id }?.let { scheduleHomework(c, it) }
