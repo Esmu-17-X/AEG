@@ -69,6 +69,7 @@ class MainActivity : Activity() {
             Store.autoFill(this)
             Scheduler.rescheduleAll(this) // restores alarms if a restart wiped them
             render()
+            Perms.prompt(this) // asks for "show over other apps / lock screen"
         }
     }
 
@@ -165,6 +166,24 @@ class MainActivity : Activity() {
         body.setPadding(dp(16), dp(16), dp(16), dp(110))
         root.addView(body)
 
+        // ---- Copilot card ----
+        val cc = Ui.card(ctx)
+        cc.orientation = LinearLayout.HORIZONTAL
+        cc.gravity = Gravity.CENTER_VERTICAL
+        cc.background = Ui.rounded(ctx, Color.parseColor("#EDE7F6"), 20)
+        val bot = Ui.text(ctx, "🤖", 32f)
+        bot.setPadding(0, 0, dp(12), 0)
+        val col = LinearLayout(ctx)
+        col.orientation = LinearLayout.VERTICAL
+        col.layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
+        col.addView(Ui.text(ctx, "Copilot", 17f, Ui.TEXT, true))
+        col.addView(Ui.text(ctx, Copilot.headline(ctx), 13f, Ui.MUTED))
+        cc.addView(bot)
+        cc.addView(col)
+        cc.addView(Ui.text(ctx, "›", 24f, Ui.PRIMARY, true))
+        cc.setOnClickListener { startActivity(Intent(ctx, CopilotActivity::class.java)) }
+        body.addView(cc)
+
         // ---- Today's subjects ----
         val selected = Store.todaySubjects(ctx).toMutableSet()
         val c1 = Ui.card(ctx)
@@ -203,6 +222,8 @@ class MainActivity : Activity() {
         c2.addView(Ui.row(ctx, "🗓️", "Weekly timetable", null) { timetableDialog() })
         c2.addView(Ui.divider(ctx))
         c2.addView(Ui.row(ctx, "🔦", "Test alarm & flashlight", null) { testAlarm() })
+        c2.addView(Ui.divider(ctx))
+        c2.addView(Ui.row(ctx, "🔓", "Alarm over lock screen", if (Perms.allOk(ctx)) "ON ✓" else "Fix") { Perms.fix(ctx) })
         body.addView(c2)
 
         // ---- Tracker ----
