@@ -7,20 +7,45 @@ import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 
-/** Full-screen alarm screen shown over the lock screen. */
+/** Full-screen alarm screen. Shows over the lock screen and over any other app. */
 class AlarmActivity : Activity() {
     private var pulse: ObjectAnimator? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    // closes this screen automatically when the alarm stops (notification Stop button, timeout…)
+    private val watcher = object : Runnable {
+        override fun run() {
+            if (!AlarmService.active) finish() else handler.postDelayed(this, 700)
+        }
+    }
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // show over the lock screen + turn the screen on
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        @Suppress("DEPRECATION")
+        window.addFlags(
+            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                WindowManager.LayoutParams.FLAG_ALLOW_LOCK_WHILE_SCREEN_ON
+        )
+
         val ctx = this
         val id = intent.getIntExtra("id", 0)
         val hw = Store.all(ctx).find { it.id == id }
@@ -76,9 +101,12 @@ class AlarmActivity : Activity() {
             stopAlarm(); finish()
         })
         setContentView(root)
+
+        handler.postDelayed(watcher, 1500)
     }
 
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
         pulse?.cancel()
         super.onDestroy()
     }
