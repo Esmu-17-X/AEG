@@ -13,7 +13,9 @@ data class Homework(
     val subject: String,
     val note: String,
     val dueAt: Long,
-    val done: Boolean
+    val done: Boolean,
+    val doneAt: Long = 0L,   // when you finished it (0 = not finished / unknown)
+    val snoozes: Int = 0     // how many times you snoozed it
 )
 
 object Store {
@@ -67,7 +69,8 @@ object Store {
             val o = arr.getJSONObject(it)
             Homework(
                 o.getInt("id"), o.getString("subject"), o.getString("note"),
-                o.getLong("due"), o.getBoolean("done")
+                o.getLong("due"), o.getBoolean("done"),
+                o.optLong("doneAt", 0L), o.optInt("snoozes", 0)
             )
         }
     }
@@ -78,15 +81,27 @@ object Store {
             arr.put(
                 JSONObject().put("id", it.id).put("subject", it.subject)
                     .put("note", it.note).put("due", it.dueAt).put("done", it.done)
+                    .put("doneAt", it.doneAt).put("snoozes", it.snoozes)
             )
         }
         prefs(c).edit().putString("list", arr.toString()).apply()
     }
 
     fun add(c: Context, hw: Homework) = saveAll(c, all(c) + hw)
+
     fun setDone(c: Context, id: Int, done: Boolean) =
-        saveAll(c, all(c).map { if (it.id == id) it.copy(done = done) else it })
+        saveAll(c, all(c).map {
+            if (it.id == id) it.copy(
+                done = done,
+                doneAt = if (done) System.currentTimeMillis() else 0L
+            ) else it
+        })
+
     fun setDue(c: Context, id: Int, due: Long) =
         saveAll(c, all(c).map { if (it.id == id) it.copy(dueAt = due) else it })
+
+    fun addSnooze(c: Context, id: Int) =
+        saveAll(c, all(c).map { if (it.id == id) it.copy(snoozes = it.snoozes + 1) else it })
+
     fun delete(c: Context, id: Int) = saveAll(c, all(c).filter { it.id != id })
 }
